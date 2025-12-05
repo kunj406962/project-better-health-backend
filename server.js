@@ -21,6 +21,8 @@ const PORT = process.env.PORT || 5000;
 
 // Start listening on the specified port
 // The app is now ready to accept incoming HTTP requests
+// In your server.js or app.js
+
 app.listen(PORT, () => {
   console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
 });

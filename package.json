@@ -19,6 +19,7 @@
     "express-session": "^1.18.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.0.0",
+    "ngrok": "^5.0.0-beta.2",
     "nodemailer": "^7.0.11",
     "passport": "^0.7.0",
     "passport-github": "^1.1.0",

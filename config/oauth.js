@@ -24,7 +24,7 @@ passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
   // URL where Google will redirect after user approves/denies
-  callbackURL: "/api/auth/google/callback"
+  callbackURL: "https://cataclinal-chantell-subreputably.ngrok-free.dev/api/auth/google/callback"
 }, async (accessToken, refreshToken, profile, done) => {
   try {
     // Import User model

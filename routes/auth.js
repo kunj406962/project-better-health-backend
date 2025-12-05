@@ -201,13 +201,101 @@ router.get('/google/callback', passport.authenticate('google', {
   // Generate JWT token for the authenticated user
   const token = generateToken(req.user._id);
   
-  // Send success response with token
-  res.json({
-    success: true,
-    message: 'Google OAuth successful',
-    token: token,
-    user: req.user
-  });
+  const deepLinkUrl = `yourapp://auth/callback?token=${encodeURIComponent(token)}`;
+  
+  // For web fallback
+  const webSuccessUrl = `https://cataclinal-chantell-subreputably.ngrok-free.dev/auth/success?token=${encodeURIComponent(token)}`;
+  
+  // Send HTML that will try to open app, then fallback to web
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Authentication Complete</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <script>
+        // Try to open the app with deep link
+        function openApp() {
+          window.location.href = '${deepLinkUrl}';
+          
+          // If app doesn't open within 2 seconds, show fallback
+          setTimeout(function() {
+            document.getElementById('fallback').style.display = 'block';
+            window.location.href = '${webSuccessUrl}';
+          }, 2000);
+        }
+        
+        // Start on page load
+        window.onload = openApp;
+      </script>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          margin: 0;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .container {
+          text-align: center;
+          background: white;
+          padding: 40px;
+          border-radius: 20px;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+          color: #333;
+          margin-bottom: 20px;
+        }
+        .spinner {
+          border: 4px solid #f3f3f3;
+          border-top: 4px solid #667eea;
+          border-radius: 50%;
+          width: 40px;
+          height: 40px;
+          animation: spin 1s linear infinite;
+          margin: 0 auto 20px;
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        #fallback {
+          display: none;
+          margin-top: 20px;
+        }
+        .btn {
+          background: #667eea;
+          color: white;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          font-size: 16px;
+          cursor: pointer;
+          text-decoration: none;
+          display: inline-block;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="spinner"></div>
+        <h1>Authentication Complete!</h1>
+        <p>Redirecting you back to the app...</p>
+        <div id="fallback">
+          <p>If you're not redirected automatically:</p>
+          <a href="${deepLinkUrl}" class="btn">Open in App</a>
+          <p style="margin-top: 10px; font-size: 14px; color: #666;">
+            Or <a href="${webSuccessUrl}">click here</a> for web version
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `);
 });
 
 /**
