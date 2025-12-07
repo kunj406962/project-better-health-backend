@@ -13,9 +13,31 @@ const passport = require('passport');
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const { generateToken } = require('../utils/tokens');
+const crypto = require('crypto');
+const { sendResetEmail, testEmailConfig } = require('../utils/emailSender');
+
 
 // Create router instance
 const router = express.Router();
+
+
+// Test email configuration (run once to check)
+router.get('/test-email', async (req, res) => {
+  try {
+    const isReady = await testEmailConfig();
+    res.json({
+      success: isReady,
+      message: isReady ? 'Email server is ready' : 'Email configuration error'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+
 
 // ======================
 // Email/Password Registration
@@ -167,148 +189,89 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ======================
-// Google OAuth Routes
-// ======================
-
 /**
- * GET /api/auth/google
+ * POST /api/auth/google-simple
  * 
- * Initiates Google OAuth flow.
- * Redirects user to Google login/consent screen.
+ * Simplest Google auth - just send user info from Expo
+ * Client is responsible for Google auth validation
  * 
- * Scope: requests access to user's profile and email
+ * Request body:
+ * {
+ *   id: string (Google ID),
+ *   email: string,
+ *   name: string,
+ *   photo: string (optional)
+ * }
  */
-router.get('/google', passport.authenticate('google', {
-  // Request access to user profile and email
-  scope: ['profile', 'email']
-}));
+router.post('/google-simple', async (req, res) => {
+  try {
+    const { id, email, name, photo } = req.body;
 
-/**
- * GET /api/auth/google/callback
- * 
- * OAuth callback URL that Google redirects to after user approves/denies.
- * 
- * Passport validates the auth code and gets user profile.
- * Configuration in config/oauth.js handles user creation/lookup.
- */
-router.get('/google/callback', passport.authenticate('google', {
-  // Don't use sessions, use tokens instead
-  session: false,
-  // Redirect to failure endpoint if OAuth fails
-  failureRedirect: '/api/auth/google/failure'
-}), (req, res) => {
-  // Generate JWT token for the authenticated user
-  const token = generateToken(req.user._id);
-  
-  const deepLinkUrl = `yourapp://auth/callback?token=${encodeURIComponent(token)}`;
-  
-  // For web fallback
-  const webSuccessUrl = `https://cataclinal-chantell-subreputably.ngrok-free.dev/auth/success?token=${encodeURIComponent(token)}`;
-  
-  // Send HTML that will try to open app, then fallback to web
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Authentication Complete</title>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <script>
-        // Try to open the app with deep link
-        function openApp() {
-          window.location.href = '${deepLinkUrl}';
-          
-          // If app doesn't open within 2 seconds, show fallback
-          setTimeout(function() {
-            document.getElementById('fallback').style.display = 'block';
-            window.location.href = '${webSuccessUrl}';
-          }, 2000);
-        }
+    // Basic validation
+    if (!id || !email || !name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields'
+      });
+    }
+
+    // Check if user exists by email
+    let user = await User.findOne({ email });
+
+    if (user) {
+      // Check if Google is already linked
+      const hasGoogleProvider = user.oauthProviders?.some(
+        p => p.provider === 'google'
+      );
+
+      if (!hasGoogleProvider) {
+        // Add Google provider
+        if (!user.oauthProviders) user.oauthProviders = [];
         
-        // Start on page load
-        window.onload = openApp;
-      </script>
-      <style>
-        body {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          height: 100vh;
-          margin: 0;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-        .container {
-          text-align: center;
-          background: white;
-          padding: 40px;
-          border-radius: 20px;
-          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-        }
-        h1 {
-          color: #333;
-          margin-bottom: 20px;
-        }
-        .spinner {
-          border: 4px solid #f3f3f3;
-          border-top: 4px solid #667eea;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          animation: spin 1s linear infinite;
-          margin: 0 auto 20px;
-        }
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        #fallback {
-          display: none;
-          margin-top: 20px;
-        }
-        .btn {
-          background: #667eea;
-          color: white;
-          border: none;
-          padding: 12px 24px;
-          border-radius: 8px;
-          font-size: 16px;
-          cursor: pointer;
-          text-decoration: none;
-          display: inline-block;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="spinner"></div>
-        <h1>Authentication Complete!</h1>
-        <p>Redirecting you back to the app...</p>
-        <div id="fallback">
-          <p>If you're not redirected automatically:</p>
-          <a href="${deepLinkUrl}" class="btn">Open in App</a>
-          <p style="margin-top: 10px; font-size: 14px; color: #666;">
-            Or <a href="${webSuccessUrl}">click here</a> for web version
-          </p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `);
-});
+        user.oauthProviders.push({
+          provider: 'google',
+          providerId: id
+        });
+        
+        user.authMethod = 'google';
+        if (photo) user.avatar = photo;
+        await user.save();
+      }
+    } else {
+      // Create new user
+      user = await User.create({
+        name,
+        email,
+        authMethod: 'google',
+        oauthProviders: [{
+          provider: 'google',
+          providerId: id
+        }],
+        avatar: photo || null
+      });
+    }
 
-/**
- * GET /api/auth/google/failure
- * 
- * OAuth failure handler.
- * Called if user denies permissions or if an error occurs.
- */
-router.get('/google/failure', (req, res) => {
-  res.status(401).json({
-    success: false,
-    message: 'Google OAuth failed'
-  });
+    // Generate token
+    const token = generateToken(user._id);
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar
+      }
+    });
+
+  } catch (error) {
+    console.error('Google simple auth error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
 });
 
 // ======================
@@ -349,8 +312,6 @@ router.get('/check-email/:email', async (req, res) => {
   }
 });
 
-const crypto = require('crypto');
-
 // Forgot Password - Generate reset link
 router.post('/forgot-password', async (req, res) => {
   try {
@@ -381,25 +342,31 @@ router.post('/forgot-password', async (req, res) => {
     
     await user.save();
 
-    // Create reset URL
-    const resetUrl = `${req.protocol}://${req.get('host')}/reset-password.html?token=${resetToken}`;
+    console.log('🔐 Reset token generated for user:', user.email);
 
-    // For now, just return the URL (you'll add email later)
+    // Send email
+    const emailSent = await sendResetEmail(email, resetToken);
+    
+    if (!emailSent) {
+      throw new Error('Failed to send email');
+    }
+
+    console.log('✅ Reset email sent successfully to:', email);
+
     res.json({
       success: true,
-      message: 'Password reset link generated',
-      resetUrl: resetUrl, // In development
-      note: 'In production, this URL would be sent via email'
+      message: 'Password reset email sent. Please check your inbox (and spam folder).'
     });
 
   } catch (error) {
-    console.error('Forgot password error:', error);
+    console.error('❌ Forgot password error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to process reset request'
+      message: 'Failed to process reset request. Please try again later.'
     });
   }
 });
+
 
 // Reset Password with token
 router.post('/reset-password', async (req, res) => {
